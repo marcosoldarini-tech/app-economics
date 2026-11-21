@@ -1,10 +1,10 @@
 // Service worker: l'app funziona anche offline.
 // Dopo ogni modifica ai file, aumenta VERSION per forzare l'aggiornamento della cache.
-const VERSION = 'economics-v2';
+const VERSION = 'economics-v3';
 const ASSETS = [
   './', './index.html', './styles.css', './app.js', './manifest.webmanifest',
   './icons/icon-180.png', './icons/icon-192.png', './icons/icon-512.png',
-  'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js',
+  'https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js',
   'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js',
 ];
 
