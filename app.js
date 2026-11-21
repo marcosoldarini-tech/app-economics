@@ -34,6 +34,8 @@ const PALETTE = ['#0f766e', '#4f46e5', '#c2410c', '#a21caf', '#0369a1', '#65a30d
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const eur = new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR', useGrouping: 'always' });
 const fmt = c => eur.format((c || 0) / 100);
+const num = new Intl.NumberFormat('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: 'always' });
+const fmtNum = c => num.format((c || 0) / 100);   // senza simbolo €, per le griglie compatte
 const pad = n => String(n).padStart(2, '0');
 const sum = (arr, f = x => x) => arr.reduce((a, x) => a + f(x), 0);
 function todayISO() { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; }
@@ -103,6 +105,15 @@ function save() {
 
 const ui = { tab: 'mese', month: currentMonthKey(), planYear: currentYear(), reportYear: currentYear(), exportYear: currentYear() };
 
+/* Tema (preferenza del dispositivo, separata dai dati): auto | light | dark */
+const THEME_KEY = 'economics.theme';
+function getTheme() { try { return localStorage.getItem(THEME_KEY) || 'auto'; } catch (e) { return 'auto'; } }
+function setTheme(t) {
+  try { if (t === 'auto') localStorage.removeItem(THEME_KEY); else localStorage.setItem(THEME_KEY, t); } catch (e) {}
+  if (t === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = t;
+  render();
+}
+
 const catList = type => (type === 'spesa_ric' ? state.catsFixed : state.cats);
 const listByKey = key => (key === 'fixed' ? state.catsFixed : state.cats);
 const catByName = (n, type = 'spesa_var') => catList(type).find(c => c.name === n);
@@ -129,14 +140,15 @@ function totals(mk) {
 }
 
 /* Statistiche per categoria di un anno: Spese + Spese fisse, mese per mese. */
-function categoryStats(y) {
+function categoryStats(y, onlyClosed = false) {
   const rows = [];
+  const inScope = t => t.date.startsWith(y + '-') && (!onlyClosed || isClosed(monthOf(t)));
   for (const type of CAT_TYPES) {
     const names = [...catList(type).map(c => c.name)];
-    state.tx.forEach(t => { if (t.type === type && t.date.startsWith(y + '-') && !names.includes(t.category)) names.push(t.category); });
+    state.tx.forEach(t => { if (t.type === type && inScope(t) && !names.includes(t.category)) names.push(t.category); });
     for (const name of names) {
       const months = Array(12).fill(0);
-      state.tx.forEach(t => { if (t.type === type && t.category === name && t.date.startsWith(y + '-')) months[Number(t.date.slice(5, 7)) - 1] += t.amount; });
+      state.tx.forEach(t => { if (t.type === type && t.category === name && inScope(t)) months[Number(t.date.slice(5, 7)) - 1] += t.amount; });
       const total = sum(months);
       rows.push({ type, group: TYPES[type].section, name, months, total, excluded: type === 'spesa_var' && isExcludedCat(name) });
     }
@@ -383,17 +395,28 @@ function renderPlan(v) {
     if (!ss.length) h += '<p class="empty">Nessuna voce</p>';
     for (const s of ss) {
       const tx = seriesTx(s.id);
-      const amts = [...new Set(tx.map(t => t.amount))];
-      const amtTxt = !tx.length ? '—' : amts.length === 1 ? `${fmt(amts[0])}/mese` : `da ${fmt(Math.min(...amts))} a ${fmt(Math.max(...amts))}`;
-      const monthsTxt = tx.length === 12 ? 'Tutti i mesi' : tx.length ? tx.map(t => MONTHS[Number(t.date.slice(5, 7)) - 1]).join(', ') : 'Nessun mese';
-      h += `<button class="series" data-act="edit-series" data-id="${s.id}">
-        <span><span class="txname">${esc(s.name)}</span><span class="txsub">${s.category ? esc(s.category) + ' · ' : ''}${monthsTxt} · ${amtTxt}</span></span>
-        <span class="txamt">${fmt(sum(tx, t => t.amount))}</span></button>`;
+      const byMonth = {};
+      tx.forEach(t => { byMonth[Number(t.date.slice(5, 7))] = t; });
+      // Importo più frequente: i mesi diversi vengono evidenziati
+      const freq = {};
+      tx.forEach(t => { freq[t.amount] = (freq[t.amount] || 0) + 1; });
+      const usual = Number(Object.entries(freq).sort((a, b) => b[1] - a[1])[0]?.[0]);
+      h += `<div class="series-card">
+        <button class="series" data-act="edit-series" data-id="${s.id}">
+          <span><span class="txname">${esc(s.name)}</span><span class="txsub">${s.category ? esc(s.category) + ' · ' : ''}${tx.length} ${tx.length === 1 ? 'mese' : 'mesi'} · Modifica voce ›</span></span>
+          <span class="txamt"><small class="txsub">Totale anno</small>${fmt(sum(tx, t => t.amount))}</span></button>
+        <div class="mgrid">${MONTHS.map((n, i) => {
+          const t = byMonth[i + 1];
+          const closed = isClosed(`${y}-${pad(i + 1)}`);
+          if (!t) return `<span class="mcell empty"><span>${n}</span><b>—</b></span>`;
+          return `<button class="mcell ${t.amount !== usual ? 'diff' : ''} ${closed ? 'closed' : ''}" data-act="edit" data-id="${t.id}" aria-label="${MONTHS_LONG[i]}: ${fmt(t.amount)}"><span>${n}${closed ? ' ✓' : ''}</span><b>${fmtNum(t.amount)}</b></button>`;
+        }).join('')}</div>
+      </div>`;
     }
     h += `<button class="addrow" data-act="add-series" data-type="${k}">+ Aggiungi</button></section>`;
   }
   if (prev.length) h += `<button class="btn block outline" data-act="copy-prev">Copia le voci dal ${y - 1}</button>`;
-  h += `<p class="help">Ogni voce pianificata crea un movimento nei mesi scelti; ogni mese resta modificabile dalla vista Mese. Per una mensilità aggiuntiva (es. tredicesima) crea una voce a parte con il solo mese interessato.</p>`;
+  h += `<p class="help">Tocca un mese per correggerne l'importo; tocca il nome della voce per cambiarla su più mesi. Gli importi evidenziati sono diversi da quello abituale, ✓ indica un mese concluso. Per una mensilità aggiuntiva (es. tredicesima) crea una voce a parte con il solo mese interessato.</p>`;
   v.innerHTML = h;
 }
 
@@ -543,23 +566,27 @@ function renderReport(v) {
   const y = ui.reportYear;
   const mks = yearMonths(y);
   const T = mks.map(totals);
-  const A = k => sum(T, t => t[k]);
-  const withData = T.filter(t => t.count > 0).length;
-  const closedN = mks.filter(isClosed).length;
+  // I report considerano solo i mesi chiusi: nei mesi aperti mancano ancora le spese variabili.
+  const closedM = mks.map(isClosed);
+  const TC = T.filter((_, i) => closedM[i]);
+  const A = k => sum(TC, t => t[k]);
+  const closedN = TC.length;
   const spese = A('spese');
-  const cs = categoryStats(y).filter(r => r.total);
+  const cs = categoryStats(y, true).filter(r => r.total);
   const counted = cs.filter(r => !r.excluded).sort((a, b) => b.total - a.total);
   const pct = r => (r.excluded || !spese ? '—' : (r.total / spese * 100).toFixed(1).replace('.', ',') + '%');
+  const cellIf = (i, html) => (closedM[i] ? html : '<td class="open">—</td>');
 
   let h = `<div class="yearchips">${dataYears().map(yy => `<button class="chip ${yy === y ? 'on' : ''}" data-act="rep-year" data-y="${yy}">${yy}</button>`).join('')}</div>
-    <p class="help">${closedN} mesi conclusi su 12${withData > closedN ? ' · i mesi non conclusi sono provvisori' : ''}</p>
+    <p class="help">Solo mesi conclusi: <b>${closedN} su 12</b>. I mesi aperti non entrano nei totali, perché mancano ancora le spese variabili.</p>
+    ${closedN ? '' : `<section class="card"><p class="empty">Nessun mese concluso nel ${y}. I report si popolano man mano che concludi i mesi.</p></section>`}
     <div class="kgrid">
       <div class="card"><div class="lbl">Entrate</div><div class="big">${fmt(A('entrate'))}</div></div>
       <div class="card"><div class="lbl">Uscite</div><div class="big">${fmt(spese)}</div></div>
       <div class="card"><div class="lbl">Gain/Loss</div><div class="big ${valCls(A('gl'))}">${fmt(A('gl'))}</div></div>
       <div class="card"><div class="lbl">Gain/Loss liquido</div><div class="big ${valCls(A('gll'))}">${fmt(A('gll'))}</div></div>
       <div class="card"><div class="lbl">Investimenti</div><div class="big inv">${fmt(A('invest'))}</div></div>
-      <div class="card"><div class="lbl">Liquido medio/mese</div><div class="big ${valCls(A('gll'))}">${fmt(withData ? Math.round(A('gll') / withData) : 0)}</div></div>
+      <div class="card"><div class="lbl">Liquido medio/mese</div><div class="big ${valCls(A('gll'))}">${fmt(closedN ? Math.round(A('gll') / closedN) : 0)}</div></div>
     </div>
 
     <section class="card"><h3>Entrate, uscite e investimenti</h3><div class="chartbox"><canvas id="c1"></canvas></div></section>
@@ -567,37 +594,39 @@ function renderReport(v) {
 
     <section class="card"><h3>Uscite per categoria</h3>
       ${cs.length ? `<div class="chartbox"><canvas id="c3"></canvas></div>
-      <div class="tablewrap"><table><thead><tr><th>Categoria</th><th>Gruppo</th><th>Totale</th><th>Media/mese</th><th>% uscite</th></tr></thead><tbody>
-      ${[...counted, ...cs.filter(r => r.excluded)].map(r => `<tr><td>${esc(r.name)}${r.excluded ? '<span class="tag">fuori calcolo</span>' : ''}</td><td>${r.type === 'spesa_ric' ? 'Fisse' : 'Spese'}</td><td>${fmt(r.total)}</td><td>${fmt(Math.round(r.total / Math.max(withData, 1)))}</td><td>${pct(r)}</td></tr>`).join('')}
+      <div class="tablewrap"><table><thead><tr><th>Categoria</th><th>Totale</th><th>Media/mese</th><th>% uscite</th></tr></thead><tbody>
+      ${[...counted, ...cs.filter(r => r.excluded)].map(r => `<tr><td>${esc(r.label)}${r.excluded ? '<span class="tag">fuori calcolo</span>' : ''}</td><td>${fmt(r.total)}</td><td>${fmt(Math.round(r.total / Math.max(closedN, 1)))}</td><td>${pct(r)}</td></tr>`).join('')}
       </tbody></table></div>` : '<p class="empty">Nessuna uscita</p>'}
     </section>
 
     <section class="card"><h3>Categorie mese per mese</h3>
       ${cs.length ? `<div class="tablewrap"><table><thead><tr><th>Categoria</th>${MONTHS.map(m => `<th>${m}</th>`).join('')}<th>Anno</th><th>%</th></tr></thead><tbody>
-      ${cs.map(r => `<tr><td>${esc(r.label)}${r.excluded ? '<span class="tag">fuori calcolo</span>' : ''}</td>${r.months.map(c => `<td>${c ? fmt(c) : ''}</td>`).join('')}<td><b>${fmt(r.total)}</b></td><td>${pct(r)}</td></tr>`).join('')}
-      <tr class="total"><td>Totale uscite</td>${T.map(t => `<td>${fmt(t.spese)}</td>`).join('')}<td>${fmt(spese)}</td><td>100%</td></tr>
+      ${cs.map(r => `<tr><td>${esc(r.label)}${r.excluded ? '<span class="tag">fuori calcolo</span>' : ''}</td>${r.months.map((c, i) => cellIf(i, `<td>${c ? fmt(c) : ''}</td>`)).join('')}<td><b>${fmt(r.total)}</b></td><td>${pct(r)}</td></tr>`).join('')}
+      <tr class="total"><td>Totale uscite</td>${T.map((t, i) => cellIf(i, `<td>${fmt(t.spese)}</td>`)).join('')}<td>${fmt(spese)}</td><td>100%</td></tr>
       </tbody></table></div><p class="help">Scorri la tabella in orizzontale. Le categorie fuori calcolo non entrano nel totale uscite.</p>` : '<p class="empty">Nessuna uscita</p>'}
     </section>
 
     <section class="card"><h3>Prospetto ${y}</h3><div class="tablewrap"><table>
-      <thead><tr><th>Mese</th><th>Entrate</th><th>Uscite</th><th>Gain/Loss</th><th>Invest.</th><th>Liquido</th><th></th></tr></thead><tbody>
-      ${T.map((t, i) => `<tr><td>${MONTHS[i]}</td><td>${fmt(t.entrate)}</td><td>${fmt(t.spese)}</td><td class="${valCls(t.gl)}">${fmt(t.gl)}</td><td>${fmt(t.invest)}</td><td class="${valCls(t.gll)}">${fmt(t.gll)}</td><td>${isClosed(mks[i]) ? '✓' : ''}</td></tr>`).join('')}
-      <tr class="total"><td>Totale</td><td>${fmt(A('entrate'))}</td><td>${fmt(spese)}</td><td class="${valCls(A('gl'))}">${fmt(A('gl'))}</td><td>${fmt(A('invest'))}</td><td class="${valCls(A('gll'))}">${fmt(A('gll'))}</td><td></td></tr>
-      </tbody></table></div><p class="help">✓ = mese concluso</p></section>`;
+      <thead><tr><th>Mese</th><th>Entrate</th><th>Uscite</th><th>Gain/Loss</th><th>Invest.</th><th>Liquido</th></tr></thead><tbody>
+      ${T.map((t, i) => (closedM[i]
+        ? `<tr><td><span class="flag">✓</span>${MONTHS[i]}</td><td>${fmt(t.entrate)}</td><td>${fmt(t.spese)}</td><td class="${valCls(t.gl)}">${fmt(t.gl)}</td><td>${fmt(t.invest)}</td><td class="${valCls(t.gll)}">${fmt(t.gll)}</td></tr>`
+        : `<tr class="open"><td><span class="flag"></span>${MONTHS[i]}</td><td>${t.count ? fmt(t.entrate) : ''}</td><td>${t.count ? fmt(t.spese) : ''}</td><td>—</td><td>${t.count ? fmt(t.invest) : ''}</td><td>—</td></tr>`)).join('')}
+      <tr class="total"><td>Totale</td><td>${fmt(A('entrate'))}</td><td>${fmt(spese)}</td><td class="${valCls(A('gl'))}">${fmt(A('gl'))}</td><td>${fmt(A('invest'))}</td><td class="${valCls(A('gll'))}">${fmt(A('gll'))}</td></tr>
+      </tbody></table></div><p class="help">✓ = mese concluso. Per i mesi aperti gli importi sono provvisori (in grigio) e non entrano nel totale.</p></section>`;
 
   const years = dataYears();
   if (years.length > 1) {
     h += `<section class="card"><h3>Confronto tra anni</h3><div class="tablewrap"><table>
-      <thead><tr><th>Anno</th><th>Entrate</th><th>Uscite</th><th>Gain/Loss</th><th>Invest.</th><th>Liquido</th></tr></thead><tbody>
-      ${years.map(yy => { const TT = yearMonths(yy).map(totals); const S = k => sum(TT, t => t[k]);
-        return `<tr><td>${yy}</td><td>${fmt(S('entrate'))}</td><td>${fmt(S('spese'))}</td><td class="${valCls(S('gl'))}">${fmt(S('gl'))}</td><td>${fmt(S('invest'))}</td><td class="${valCls(S('gll'))}">${fmt(S('gll'))}</td></tr>`; }).join('')}
-      </tbody></table></div></section>`;
+      <thead><tr><th>Anno</th><th>Mesi</th><th>Entrate</th><th>Uscite</th><th>Gain/Loss</th><th>Invest.</th><th>Liquido</th></tr></thead><tbody>
+      ${years.map(yy => { const TT = yearMonths(yy).filter(isClosed).map(totals); const S = k => sum(TT, t => t[k]);
+        return `<tr><td>${yy}</td><td>${TT.length}/12</td><td>${fmt(S('entrate'))}</td><td>${fmt(S('spese'))}</td><td class="${valCls(S('gl'))}">${fmt(S('gl'))}</td><td>${fmt(S('invest'))}</td><td class="${valCls(S('gll'))}">${fmt(S('gll'))}</td></tr>`; }).join('')}
+      </tbody></table></div><p class="help">Solo mesi conclusi.</p></section>`;
   }
   v.innerHTML = h;
-  drawCharts(T, counted);
+  drawCharts(T, counted, closedM);
 }
 
-function drawCharts(T, catRows) {
+function drawCharts(T, catRows, closedM) {
   if (typeof Chart === 'undefined') {
     document.querySelectorAll('.chartbox').forEach(b => { b.outerHTML = '<p class="empty">Grafici non disponibili: apri l\'app una volta con la connessione attiva.</p>'; });
     return;
@@ -608,7 +637,8 @@ function drawCharts(T, catRows) {
   const money = { callback: v => eur.format(v).replace(',00', '') };
   const tip = { callbacks: { label: c => `${c.dataset.label || c.label}: ${eur.format(c.parsed.y ?? c.parsed)}` } };
   const pos = cssVar('--pos'), neg = cssVar('--neg'), inv = cssVar('--inv'), acc = cssVar('--accent');
-  const e = k => T.map(t => t[k] / 100);
+  // Mesi aperti: nessun valore (barra vuota), così il grafico mostra solo i mesi chiusi
+  const e = k => T.map((t, i) => (closedM[i] ? t[k] / 100 : null));
 
   charts.push(new Chart(document.getElementById('c1'), {
     type: 'bar',
@@ -621,7 +651,7 @@ function drawCharts(T, catRows) {
   }));
 
   let run = 0;
-  const cum = T.map(t => (run += t.gll) / 100);
+  const cum = T.map((t, i) => (closedM[i] ? (run += t.gll) / 100 : null));
   charts.push(new Chart(document.getElementById('c2'), {
     data: { labels: MONTHS, datasets: [
       { type: 'bar', label: 'Gain/Loss', data: e('gl'), backgroundColor: e('gl').map(v => (v >= 0 ? pos : neg)), borderRadius: 4, order: 2 },
@@ -662,6 +692,11 @@ function renderSettings(v) {
     ${isStandalone() ? '' : `<section class="card"><h3>Installa sull'iPhone</h3><div class="help"><ol>
       <li>Apri questa pagina in <b>Safari</b>.</li><li>Tocca <b>Condividi</b> → <b>Aggiungi alla schermata Home</b>.</li>
       <li>Usa sempre l'icona sulla Home: i dati inseriti nella scheda di Safari restano separati da quelli dell'app installata.</li></ol></div></section>`}
+
+    <section class="card"><h3>Aspetto</h3>
+      <div class="chips" style="margin-top:8px">${[['auto', 'Automatico'], ['light', 'Chiaro'], ['dark', 'Scuro']].map(([k, l]) => `<button class="chip ${getTheme() === k ? 'on' : ''}" data-act="theme" data-theme="${k}">${l}</button>`).join('')}</div>
+      <p class="help">"Automatico" segue l'impostazione chiaro/scuro dell'iPhone.</p>
+    </section>
 
     <section class="card"><h3>Archivio Numbers</h3>
       <p class="help">Un file per anno (<b>Economics ${ui.exportYear}.xlsx</b>) con i fogli Stipendio, Altri introiti, Spese, Spese fisse, Investimenti, Prospetto e Prospetto categorie. Salvalo su iCloud Drive e aprilo con Numbers.</p>
@@ -784,15 +819,16 @@ function buildWorkbook(y) {
     return [excelSerial(mk + '-01'), euro(t.entrate), euro(t.spese), c ? euro(t.gl) : '', euro(t.invest), c ? euro(t.gll) : '', c ? 'Sì' : 'No'];
   });
   const closedT = T.filter((_, i) => isClosed(mks[i]));
-  pRows.push(['Totale', euro(sum(T, t => t.entrate)), euro(sum(T, t => t.spese)), euro(sum(closedT, t => t.gl)), euro(sum(T, t => t.invest)), euro(sum(closedT, t => t.gll)), `${closedT.length}/12`]);
+  pRows.push(['Totale mesi chiusi', euro(sum(closedT, t => t.entrate)), euro(sum(closedT, t => t.spese)), euro(sum(closedT, t => t.gl)), euro(sum(closedT, t => t.invest)), euro(sum(closedT, t => t.gll)), `${closedT.length}/12`]);
   XLSX.utils.book_append_sheet(wb, makeSheet(['Mese', 'Entrate', 'Uscite', 'Gain/Loss', 'Investimenti', 'Gain/Loss liquido', 'Mese chiuso'],
     pRows, { 0: F_MONTH, 1: F_EUR, 2: F_EUR, 3: F_EUR, 4: F_EUR, 5: F_EUR }, [16, 12, 12, 12, 12, 16, 11]), 'Prospetto');
 
   // Prospetto categorie: categorie × mesi, totale anno e % sulle uscite
-  const spese = sum(T, t => t.spese);
-  const cs = categoryStats(y).filter(r => r.total);
+  // Come nel Report dell'app: solo i mesi chiusi
+  const spese = sum(closedT, t => t.spese);
+  const cs = categoryStats(y, true).filter(r => r.total);
   const cRows = cs.map(r => [r.type === 'spesa_ric' ? 'Spese fisse' : 'Spese', r.name, ...r.months.map(c => (c ? euro(c) : '')), euro(r.total), r.excluded ? 'fuori calcolo' : (spese ? r.total / spese : 0)]);
-  cRows.push(['Totale uscite', '', ...T.map(t => euro(t.spese)), euro(spese), spese ? 1 : 0]);
+  cRows.push(['Totale uscite', '', ...T.map((t, i) => (isClosed(mks[i]) ? euro(t.spese) : '')), euro(spese), spese ? 1 : 0]);
   const cf = { 14: F_EUR, 15: F_PCT }; for (let c = 2; c < 14; c++) cf[c] = F_EUR;
   XLSX.utils.book_append_sheet(wb, makeSheet(['Gruppo', 'Categoria', ...MONTHS, 'Totale anno', '% uscite'],
     cRows, cf, [12, 22, ...Array(12).fill(10), 12, 9]), 'Prospetto categorie');
@@ -1014,6 +1050,7 @@ const ACTIONS = {
     if (list.some(c => c.name === n)) return toast('Categoria già presente');
     list.push(key === 'fixed' ? { name: n } : { name: n, excluded: false }); save(); render();
   },
+  theme: el => setTheme(el.dataset.theme),
   export: () => exportXlsx(ui.exportYear),
   import: () => document.getElementById('importFile').click(),
   wipe: async () => {
@@ -1045,7 +1082,7 @@ document.querySelector('.tabbar').addEventListener('click', e => {
   ui.tab = b.dataset.tab; render(true);
 });
 document.getElementById('fab').addEventListener('click', () => openTxSheet(null));
-matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (ui.tab === 'report') render(); });
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (ui.tab === 'report' && getTheme() === 'auto') render(); });
 
 /* ---------- Avvio ---------- */
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {

@@ -1,6 +1,6 @@
 // Service worker: l'app funziona anche offline.
 // Dopo ogni modifica ai file, aumenta VERSION per forzare l'aggiornamento della cache.
-const VERSION = 'economics-v1';
+const VERSION = 'economics-v2';
 const ASSETS = [
   './', './index.html', './styles.css', './app.js', './manifest.webmanifest',
   './icons/icon-180.png', './icons/icon-192.png', './icons/icon-512.png',
@@ -24,10 +24,10 @@ self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
   if (url.origin === location.origin) {
     // File dell'app: prima la rete (così gli aggiornamenti arrivano), poi la cache.
+    // cache: 'no-cache' chiede sempre al server se il file è cambiato, invece di usare la cache HTTP del browser.
     e.respondWith(
-      fetch(e.request).then(res => {
-        const copy = res.clone();
-        caches.open(VERSION).then(c => c.put(e.request, copy));
+      fetch(e.request.url, { cache: 'no-cache' }).then(res => {
+        if (res.ok) { const copy = res.clone(); caches.open(VERSION).then(c => c.put(e.request, copy)); }
         return res;
       }).catch(() => caches.match(e.request, { ignoreSearch: true }).then(r => r || caches.match('./index.html')))
     );
