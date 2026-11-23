@@ -1,6 +1,6 @@
 // Service worker: l'app funziona anche offline.
 // Dopo ogni modifica ai file, aumenta VERSION per forzare l'aggiornamento della cache.
-const VERSION = 'economics-v3';
+const VERSION = 'economics-v4';
 const ASSETS = [
   './', './index.html', './styles.css', './app.js', './manifest.webmanifest',
   './icons/icon-180.png', './icons/icon-192.png', './icons/icon-512.png',

@@ -397,10 +397,6 @@ function renderPlan(v) {
       const tx = seriesTx(s.id);
       const byMonth = {};
       tx.forEach(t => { byMonth[Number(t.date.slice(5, 7))] = t; });
-      // Importo più frequente: i mesi diversi vengono evidenziati
-      const freq = {};
-      tx.forEach(t => { freq[t.amount] = (freq[t.amount] || 0) + 1; });
-      const usual = Number(Object.entries(freq).sort((a, b) => b[1] - a[1])[0]?.[0]);
       h += `<div class="series-card">
         <button class="series" data-act="edit-series" data-id="${s.id}">
           <span><span class="txname">${esc(s.name)}</span><span class="txsub">${s.category ? esc(s.category) + ' · ' : ''}${tx.length} ${tx.length === 1 ? 'mese' : 'mesi'} · Modifica voce ›</span></span>
@@ -409,14 +405,14 @@ function renderPlan(v) {
           const t = byMonth[i + 1];
           const closed = isClosed(`${y}-${pad(i + 1)}`);
           if (!t) return `<span class="mcell empty"><span>${n}</span><b>—</b></span>`;
-          return `<button class="mcell ${t.amount !== usual ? 'diff' : ''} ${closed ? 'closed' : ''}" data-act="edit" data-id="${t.id}" aria-label="${MONTHS_LONG[i]}: ${fmt(t.amount)}"><span>${n}${closed ? ' ✓' : ''}</span><b>${fmtNum(t.amount)}</b></button>`;
+          return `<button class="mcell ${closed ? 'closed' : ''}" data-act="edit" data-id="${t.id}" aria-label="${MONTHS_LONG[i]}: ${fmt(t.amount)}"><span>${n}${closed ? ' ✓' : ''}</span><b>${fmtNum(t.amount)}</b></button>`;
         }).join('')}</div>
       </div>`;
     }
     h += `<button class="addrow" data-act="add-series" data-type="${k}">+ Aggiungi</button></section>`;
   }
   if (prev.length) h += `<button class="btn block outline" data-act="copy-prev">Copia le voci dal ${y - 1}</button>`;
-  h += `<p class="help">Tocca un mese per correggerne l'importo; tocca il nome della voce per cambiarla su più mesi. Gli importi evidenziati sono diversi da quello abituale, ✓ indica un mese concluso. Per una mensilità aggiuntiva (es. tredicesima) crea una voce a parte con il solo mese interessato.</p>`;
+  h += `<p class="help">Tocca un mese per correggerne l'importo; tocca il nome della voce per cambiarla su più mesi. ✓ indica un mese concluso. Per una mensilità aggiuntiva (es. tredicesima) crea una voce a parte con il solo mese interessato.</p>`;
   v.innerHTML = h;
 }
 

@@ -220,8 +220,6 @@ main { padding: 0 16px 24px; max-width: 720px; margin: 0 auto; }
 }
 .mcell span { color: var(--muted); font-size: 11px; }
 .mcell b { font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
-.mcell.diff { border-color: var(--accent); }
-.mcell.diff b { color: var(--accent); }
 .mcell.closed { opacity: .65; }
 .mcell.empty { border-style: dashed; }
 .mcell.empty b { color: var(--muted); font-weight: 400; }
