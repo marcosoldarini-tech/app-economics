@@ -272,12 +272,13 @@ function renderMonth(v) {
 }
 
 /* ----- Inserimento / modifica movimento ----- */
-function openTxSheet(tx, presetType) {
+function openTxSheet(tx, presetType, preset) {
   const isNew = !tx;
   const mk = ui.month;
   const d = tx ? { ...tx } : {
     type: presetType || 'spesa_var', amount: null, category: '', description: '',
     date: mk === currentMonthKey() ? todayISO() : `${mk}-01`,
+    ...preset,
   };
   const locked = !isNew && isClosed(monthOf(d));
   const series = d.seriesId && state.series[d.seriesId];
@@ -334,6 +335,11 @@ function openTxSheet(tx, presetType) {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return toast('Inserisci una data');
       if (isClosed(date.slice(0, 7))) return toast(`${mkLabel(date.slice(0, 7))} è concluso: riaprilo prima`);
       if (CAT_TYPES.includes(d.type) && !d.category) return toast('Scegli una categoria');
+      if (series) {
+        // Una voce pianificata ha al massimo un importo per mese, nel proprio anno
+        if (Number(date.slice(0, 4)) !== series.year) return toast(`La voce «${series.name}» è del ${series.year}: scegli una data di quell'anno`);
+        if (state.tx.some(x => x.seriesId === series.id && x.id !== d.id && monthOf(x) === date.slice(0, 7))) return toast(`«${series.name}» ha già un importo per ${mkLabel(date.slice(0, 7))}`);
+      }
       const rec = {
         id: tx ? tx.id : uid(), type: d.type, amount, date,
         category: CAT_TYPES.includes(d.type) ? d.category : '',
@@ -404,7 +410,8 @@ function renderPlan(v) {
         <div class="mgrid">${MONTHS.map((n, i) => {
           const t = byMonth[i + 1];
           const closed = isClosed(`${y}-${pad(i + 1)}`);
-          if (!t) return `<span class="mcell empty"><span>${n}</span><b>—</b></span>`;
+          if (!t && closed) return `<span class="mcell empty"><span>${n} ✓</span><b>—</b></span>`;
+          if (!t) return `<button class="mcell empty" data-act="add-month" data-sid="${s.id}" data-m="${i + 1}" aria-label="${MONTHS_LONG[i]}: aggiungi importo"><span>${n}</span><b>+</b></button>`;
           return `<button class="mcell ${closed ? 'closed' : ''}" data-act="edit" data-id="${t.id}" aria-label="${MONTHS_LONG[i]}: ${fmt(t.amount)}"><span>${n}${closed ? ' ✓' : ''}</span><b>${fmtNum(t.amount)}</b></button>`;
         }).join('')}</div>
       </div>`;
@@ -412,7 +419,7 @@ function renderPlan(v) {
     h += `<button class="addrow" data-act="add-series" data-type="${k}">+ Aggiungi</button></section>`;
   }
   if (prev.length) h += `<button class="btn block outline" data-act="copy-prev">Copia le voci dal ${y - 1}</button>`;
-  h += `<p class="help">Tocca un mese per correggerne l'importo; tocca il nome della voce per cambiarla su più mesi. ✓ indica un mese concluso. Per una mensilità aggiuntiva (es. tredicesima) crea una voce a parte con il solo mese interessato.</p>`;
+  h += `<p class="help">Tocca un mese per correggerne l'importo, oppure un mese vuoto (+) per aggiungerne uno solo per quel mese, utile per le bollette con importi variabili; tocca il nome della voce per cambiarla su più mesi. ✓ indica un mese concluso. Per una mensilità aggiuntiva (es. tredicesima) crea una voce a parte con il solo mese interessato.</p>`;
   v.innerHTML = h;
 }
 
@@ -529,26 +536,46 @@ function openSeriesSheet(sid, presetType) {
   });
 }
 
-async function copyPrevYear() {
+function copyPrevYear() {
   const y = ui.planYear;
   const prev = Object.values(state.series).filter(s => s.year === y - 1);
   const already = new Set(Object.values(state.series).filter(s => s.year === y).map(s => s.type + '|' + s.name));
-  const todo = prev.filter(s => !already.has(s.type + '|' + s.name));
+  const todo = prev.filter(s => !already.has(s.type + '|' + s.name) && seriesTx(s.id).length);
   if (!todo.length) return toast(`Le voci del ${y - 1} sono già presenti`);
-  if (!(await ask(`Copiare ${todo.length} voci dal ${y - 1}?`, "Ogni voce viene ricreata negli stessi mesi (esclusi quelli conclusi), con l'importo dell'ultimo mese dell'anno precedente. Potrai poi modificarle.", 'Copia'))) return;
-  for (const p of todo) {
-    const ptx = seriesTx(p.id);
-    const last = ptx[ptx.length - 1];
-    if (!last) continue;
-    const months = new Set(ptx.map(t => Number(t.date.slice(5, 7))));
-    const id = uid();
-    state.series[id] = { id, year: y, type: p.type, name: p.name, category: p.category || '', day: p.day };
-    for (const m of months) {
-      if (isClosed(`${y}-${pad(m)}`)) continue;
-      state.tx.push({ id: uid(), type: p.type, amount: last.amount, category: p.category || '', description: p.name, date: dateFor(y, m, p.day), seriesId: id });
-    }
-  }
-  save(); render(); toast('Voci copiate');
+  // Voci con importi diversi tra i mesi (es. bollette): non spuntate di partenza
+  const variable = s => new Set(seriesTx(s.id).map(t => t.amount)).size > 1;
+  const groups = PLAN_TYPES.map(k => [k, todo.filter(s => s.type === k).sort((a, b) => a.name.localeCompare(b.name))]).filter(([, l]) => l.length);
+
+  openSheet(`
+    <h2>Copia le voci dal ${y - 1}</h2>
+    <p>Scegli le voci da ricreare nel ${y}. Ognuna viene ricreata negli stessi mesi (esclusi quelli conclusi), con l'importo dell'ultimo mese del ${y - 1}. Le voci con importi diversi da un mese all'altro, come le bollette, partono senza spunta.</p>
+    ${groups.map(([k, l]) => `<div class="subh">${TYPES[k].section}</div><div class="picklist">${l.map(p => {
+      const ptx = seriesTx(p.id), last = ptx[ptx.length - 1];
+      return `<label><input type="checkbox" value="${p.id}" ${variable(p) ? '' : 'checked'}><span><span class="txname">${esc(p.name)}</span><span class="txsub">${p.category ? esc(p.category) + ' · ' : ''}${ptx.length} ${ptx.length === 1 ? 'mese' : 'mesi'} · ${fmt(last.amount)}${variable(p) ? ' · importi variabili' : ''}</span></span></label>`;
+    }).join('')}</div>`).join('')}
+    <div class="actions">
+      <button class="btn" id="c-cancel">Annulla</button>
+      <button class="btn primary" id="c-ok">Copia</button>
+    </div>`,
+  el => {
+    el.querySelector('#c-cancel').onclick = closeSheet;
+    el.querySelector('#c-ok').onclick = () => {
+      const ids = new Set([...el.querySelectorAll('.picklist input:checked')].map(i => i.value));
+      if (!ids.size) return toast('Seleziona almeno una voce');
+      for (const p of todo.filter(x => ids.has(x.id))) {
+        const ptx = seriesTx(p.id);
+        const last = ptx[ptx.length - 1];
+        const months = new Set(ptx.map(t => Number(t.date.slice(5, 7))));
+        const id = uid();
+        state.series[id] = { id, year: y, type: p.type, name: p.name, category: p.category || '', day: p.day };
+        for (const m of months) {
+          if (isClosed(`${y}-${pad(m)}`)) continue;
+          state.tx.push({ id: uid(), type: p.type, amount: last.amount, category: p.category || '', description: p.name, date: dateFor(y, m, p.day), seriesId: id });
+        }
+      }
+      save(); closeSheet(); render(); toast(ids.size === 1 ? 'Voce copiata' : `${ids.size} voci copiate`);
+    };
+  });
 }
 
 /* ----- Vista Report ----- */
@@ -685,9 +712,10 @@ function renderSettings(v) {
   const years = dataYears();
   if (!years.includes(ui.exportYear)) ui.exportYear = years[years.length - 1];
   v.innerHTML = `
-    ${isStandalone() ? '' : `<section class="card"><h3>Installa sull'iPhone</h3><div class="help"><ol>
-      <li>Apri questa pagina in <b>Safari</b>.</li><li>Tocca <b>Condividi</b> → <b>Aggiungi alla schermata Home</b>.</li>
-      <li>Usa sempre l'icona sulla Home: i dati inseriti nella scheda di Safari restano separati da quelli dell'app installata.</li></ol></div></section>`}
+    ${isStandalone() ? '' : `<section class="card"><h3>Installa sul telefono</h3><div class="help"><ol>
+      <li>Apri questa pagina nel <b>browser</b> del telefono.</li>
+      <li>iPhone: tocca <b>Condividi</b> → <b>Aggiungi alla schermata Home</b>. Android: menu <b>⋮</b> → <b>Installa app</b> (o <b>Aggiungi a schermata Home</b>).</li>
+      <li>Usa sempre l'icona sulla Home: i dati inseriti nella scheda del browser restano separati da quelli dell'app installata.</li></ol></div></section>`}
 
     <section class="card"><h3>Aspetto</h3>
       <div class="chips" style="margin-top:8px">${[['auto', 'Automatico'], ['light', 'Chiaro'], ['dark', 'Scuro']].map(([k, l]) => `<button class="chip ${getTheme() === k ? 'on' : ''}" data-act="theme" data-theme="${k}">${l}</button>`).join('')}</div>
@@ -1029,6 +1057,10 @@ const ACTIONS = {
   today: () => { ui.month = currentMonthKey(); render(); },
   edit: el => { const t = state.tx.find(x => x.id === el.dataset.id); if (t) openTxSheet(t); },
   add: el => openTxSheet(null, el.dataset.type),
+  'add-month': el => {
+    const s = state.series[el.dataset.sid]; if (!s) return;
+    openTxSheet(null, null, { type: s.type, category: s.category || '', description: s.name, date: dateFor(s.year, Number(el.dataset.m), s.day), seriesId: s.id });
+  },
   'close-month': closeMonth,
   reopen: reopenMonth,
   'plan-prev': () => { ui.planYear--; render(); },

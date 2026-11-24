@@ -203,6 +203,10 @@ main { padding: 0 16px 24px; max-width: 720px; margin: 0 auto; }
 .monthgrid label:has(input:checked) { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .monthgrid label:has(input:disabled) { opacity: .45; }
 .monthgrid input { position: absolute; opacity: 0; pointer-events: none; }
+.picklist { display: flex; flex-direction: column; gap: 6px; margin: 6px 0 12px; }
+.picklist label { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); }
+.picklist input { width: 20px; height: 20px; flex: none; accent-color: var(--accent); }
+.picklist label > span { min-width: 0; }
 
 /* Piano */
 .series-card { border-top: 1px solid var(--border); padding: 4px 0 12px; }

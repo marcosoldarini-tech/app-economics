@@ -12,16 +12,19 @@ I dati restano solo sul dispositivo. Il file Excel esportato, da aprire con Numb
 4. **Settings → Pages → Build and deployment**: Source = *Deploy from a branch*, Branch = `main`, cartella `/ (root)` → **Save**.
 5. Dopo un paio di minuti l'app è su <https://marcosoldarini-tech.github.io/app-economics/>.
 
-## Installazione sull'iPhone
+## Installazione sul telefono
 
-1. Apri l'indirizzo in **Safari**. Altri browser su iOS non installano le web app allo stesso modo.
-2. **Condividi → Aggiungi alla schermata Home**.
-3. Usa sempre l'icona sulla Home: i dati della scheda di Safari sono separati da quelli dell'app installata.
+1. Apri l'indirizzo nel **browser** del telefono.
+2. iPhone: **Condividi → Aggiungi alla schermata Home**. Android: menu **⋮ → Installa app** (o **Aggiungi a schermata Home**).
+3. Usa sempre l'icona sulla Home: i dati della scheda del browser sono separati da quelli dell'app installata.
+
+I dati restano sul telefono di chi usa l'app: ogni persona ha i propri.
 
 ## Flusso mensile consigliato
 
-- **Inizio anno**: nella sezione *Piano* crea stipendio, spese fisse e investimenti, scegliendo i mesi: tutti, alterni o a mano. Per gli anni successivi usa "Copia le voci dall'anno precedente".
+- **Inizio anno**: nella sezione *Piano* crea stipendio, spese fisse e investimenti, scegliendo i mesi: tutti, alterni o a mano. Per gli anni successivi usa "Copia le voci dall'anno precedente" e scegli quali voci copiare: quelle con importi variabili, come le bollette, partono senza spunta.
 - **Durante il mese**: aggiungi spese e altri introiti con il pulsante **+**.
+- **Bollette e voci con importi variabili** (es. Enel): crea la voce una volta nel *Piano*, poi a ogni bolletta tocca il mese vuoto (**+**) nel suo blocco e inserisci l'importo. Vale solo per quel mese.
 - **Fine mese**: premi **Mese concluso** ed esporta `Economics <anno>.xlsx` su iCloud Drive, sostituendo il precedente. Aprilo con Numbers.
 
 L'app è l'originale; il file Numbers è l'archivio storico. I dati si inseriscono e si correggono solo nell'app.
